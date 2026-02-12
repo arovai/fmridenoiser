@@ -1,0 +1,2 @@
+[console_scripts]
+fmridenoiser = fmridenoiser.__main__:main
