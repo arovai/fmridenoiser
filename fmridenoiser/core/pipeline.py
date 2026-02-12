@@ -8,6 +8,7 @@ This module orchestrates the complete participant-level denoising workflow:
 5. FD-based temporal censoring (optional)
 6. Output saving with BIDS-compliant names and JSON sidecars
 7. HTML report generation
+8. Brain mask copying from fMRIPrep outputs
 """
 
 import logging
@@ -23,6 +24,7 @@ from fmridenoiser.config.loader import save_config
 from fmridenoiser.io.bids import create_bids_layout, query_participant_files
 from fmridenoiser.io.paths import create_dataset_description, validate_bids_dir
 from fmridenoiser.io.readers import get_repetition_time
+from fmridenoiser.io.masks import find_brain_masks, copy_brain_masks
 from fmridenoiser.preprocessing.resampling import (
     check_geometric_consistency,
     resample_to_reference,
@@ -68,6 +70,7 @@ def run_denoising_pipeline(
             - 'denoised': List of denoised functional images
             - 'resampled': List of resampled images (if resampling needed)
             - 'censored': List of censored images (if censoring enabled)
+            - 'masks': List of copied brain mask files
 
     Raises:
         BIDSError: If BIDS dataset or derivatives are invalid.
@@ -82,7 +85,11 @@ def run_denoising_pipeline(
         'denoised': [],
         'resampled': [],
         'censored': [],
+        'masks': [],
     }
+    
+    # Track processed subjects for mask copying
+    processed_subjects = set()
 
     with timer(logger, "Participant-level denoising"):
         # === Step 1: Setup ===
@@ -97,6 +104,32 @@ def run_denoising_pipeline(
 
         # Create BIDS layout
         layout = create_bids_layout(bids_dir, derivatives, logger)
+
+        # Determine fMRIPrep directory path for mask copying
+        fmriprep_dir = None
+        if derivatives and 'fmriprep' in derivatives:
+            fmriprep_dir = derivatives['fmriprep']
+            if logger:
+                logger.debug(f"Using fMRIPrep from derivatives: {fmriprep_dir}")
+        else:
+            # Check if bids_dir itself is an fMRIPrep directory
+            if _is_fmriprep_dir(bids_dir):
+                fmriprep_dir = bids_dir
+                if logger:
+                    logger.debug(f"Detected fMRIPrep directory at BIDSDIR: {bids_dir}")
+            else:
+                # Check for fMRIPrep in standard derivatives location
+                default_fmriprep = bids_dir / "derivatives" / "fmriprep"
+                if default_fmriprep.exists():
+                    fmriprep_dir = default_fmriprep
+                    if logger:
+                        logger.debug(f"Using fMRIPrep from standard location: {fmriprep_dir}")
+
+        if fmriprep_dir is None and logger:
+            logger.warning(
+                "fMRIPrep derivatives directory not found. Brain masks will not be copied. "
+                "You can specify it with: --derivatives fmriprep=/path/to/fmriprep"
+            )
 
         # Validate requested participant labels exist in dataset
         available_subjects = set(layout.get_subjects())
@@ -175,6 +208,11 @@ def run_denoising_pipeline(
                 file_entities['denoise'] = config.denoising_strategy
 
             resampling_info = None
+
+            # Track subject for mask copying
+            subject_id = file_entities.get('sub')
+            if subject_id:
+                processed_subjects.add((subject_id, file_entities.get('ses')))
 
             with timer(logger, f"  Subject {file_entities.get('sub', 'unknown')}"):
                 # --- Resample if needed ---
@@ -292,6 +330,39 @@ def run_denoising_pipeline(
                     resampling_info=resampling_info,
                 )
 
+        # === Step 5: Copy brain masks from fMRIPrep ===
+        if fmriprep_dir:
+            log_section(logger, "Brain Mask Copying")
+            
+            for subject_id, session_id in processed_subjects:
+                try:
+                    # Find brain masks
+                    brain_masks = find_brain_masks(
+                        fmriprep_dir,
+                        subject_id,
+                        session=session_id,
+                        logger=logger,
+                    )
+                    
+                    # Copy masks if found
+                    if brain_masks['anat'] or brain_masks['func']:
+                        copied = copy_brain_masks(
+                            brain_masks,
+                            output_dir,
+                            subject_id,
+                            session=session_id,
+                            logger=logger,
+                        )
+                        n_copied = len(copied['anat']) + len(copied['func'])
+                        if n_copied > 0:
+                            outputs['masks'].extend(copied['anat'] + copied['func'])
+                            logger.info(f"Copied {n_copied} brain mask(s) for sub-{subject_id}")
+                    else:
+                        logger.debug(f"No brain masks found for sub-{subject_id}")
+                        
+                except Exception as e:
+                    logger.warning(f"Failed to copy brain masks for sub-{subject_id}: {e}")
+
         # === Summary ===
         log_section(logger, "Summary")
 
@@ -299,6 +370,8 @@ def run_denoising_pipeline(
         logger.info(f"Generated {len(outputs['denoised'])} denoised output(s)")
         if outputs['censored']:
             logger.info(f"Generated {len(outputs['censored'])} censored output(s)")
+        if outputs['masks']:
+            logger.info(f"Copied {len(outputs['masks'])} brain mask file(s)")
         logger.info(f"Outputs saved to: {output_dir}")
 
     return outputs
@@ -633,3 +706,43 @@ def _get_output_path(
 
     filename = "_".join(parts) + extension
     return sub_dir / filename
+
+def _is_fmriprep_dir(path: Path) -> bool:
+    """Check if a directory appears to be an fMRIPrep derivatives directory.
+    
+    Heuristic: looks for sub-*/anat and sub-*/func directories with typical
+    fMRIPrep files (*_preproc.nii.gz or *_desc-brain_mask.nii.gz).
+    
+    Args:
+        path: Path to check
+        
+    Returns:
+        True if directory appears to be fMRIPrep output, False otherwise
+    """
+    if not path.is_dir():
+        return False
+    
+    # Look for subject directories
+    sub_dirs = list(path.glob("sub-*/"))
+    if not sub_dirs:
+        return False
+    
+    # Check if at least one subject has anat or func with fMRIPrep-style files
+    for sub_dir in sub_dirs[:3]:  # Check first 3 subjects for efficiency
+        # Check anat subdirectory
+        anat_dir = sub_dir / "anat"
+        if anat_dir.is_dir():
+            preproc_files = list(anat_dir.glob("*_preproc.nii.gz"))
+            brain_masks = list(anat_dir.glob("*_desc-brain_mask.nii.gz"))
+            if preproc_files or brain_masks:
+                return True
+        
+        # Check func subdirectory
+        func_dir = sub_dir / "func"
+        if func_dir.is_dir():
+            preproc_files = list(func_dir.glob("*_preproc.nii.gz"))
+            brain_masks = list(func_dir.glob("*_desc-brain_mask.nii.gz"))
+            if preproc_files or brain_masks:
+                return True
+    
+    return False

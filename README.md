@@ -2,7 +2,7 @@
 
 **fMRI Denoising BIDS App for fMRIPrep Outputs**
 
-fmridenoiser applies denoising (confound regression + temporal filtering) and optional FD-based temporal censoring to fMRI data preprocessed with [fMRIPrep](https://fmriprep.org). It produces BIDS-compliant denoised outputs that can be used as input to downstream tools like [connectomix](https://github.com/ln2t/connectomix).
+fmridenoiser applies denoising (confound regression + temporal filtering) and optional FD-based temporal censoring to fMRI data preprocessed with [fMRIPrep](https://fmriprep.org). It produces BIDS-compliant denoised outputs that can be used as input to downstream tools like [connectomix](https://github.com/ln2t/connectomix) (connectomix version 4.0.0 and onwards).
 
 ## Features
 
@@ -11,15 +11,10 @@ fmridenoiser applies denoising (confound regression + temporal filtering) and op
 - **Geometric consistency** checking and resampling across subjects
 - **BIDS-compliant** outputs with JSON sidecars for provenance tracking
 - **HTML quality reports** with denoising histograms, confound time series, and FD traces
+- **Brain mask copying** from fMRIPrep outputs (both anatomical and functional masks)
 - **Wildcard support** for confound selection (e.g., `a_comp_cor_*`)
 
 ## Installation
-
-```bash
-pip install fmridenoiser
-```
-
-Or from source:
 
 ```bash
 git clone https://github.com/ln2t/fmridenoiser.git
@@ -78,6 +73,9 @@ output_dir/
     ├── func/
     │   ├── sub-01_task-rest_space-MNI_denoise-csfwm6p_desc-denoised_bold.nii.gz
     │   └── sub-01_task-rest_space-MNI_denoise-csfwm6p_desc-denoised_bold.json
+    ├── masks/
+    │   ├── sub-01_space-MNI_desc-brain_mask.nii.gz
+    │   └── sub-01_task-rest_space-MNI_desc-brain_mask.nii.gz
     ├── figures/
     │   └── [QA figures]
     └── sub-01_task-rest_desc-csfwm6p_denoising-report.html
@@ -89,11 +87,10 @@ fmridenoiser is designed to work as a preprocessing step before [connectomix](ht
 
 ```bash
 # Step 1: Denoise with fmridenoiser
-fmridenoiser /data/bids /data/derivatives/denoised participant --strategy csfwm_6p
+fmridenoiser /data/bids /data/derivatives/fmridenoiser participant --strategy csfwm_6p
 
 # Step 2: Compute connectivity with connectomix
-connectomix /data/bids /data/derivatives/connectivity participant \
-    --denoised-derivatives /data/derivatives/denoised \
+connectomix /data/derivatives/fmridenoiser /data/derivatives/connectomix participant \
     --method roiToRoi --atlas schaefer2018n100
 ```
 
