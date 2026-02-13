@@ -1,6 +1,14 @@
+<div align="center">
+
 # fmridenoiser
 
 **fMRI Denoising BIDS App for fMRIPrep Outputs**
+
+[Features](#features) | [Installation](#installation) | [Quick Start](#quick-start) | [Strategies](#denoising-strategies) | [References](#references)
+
+</div>
+
+## Overview
 
 fmridenoiser applies denoising (confound regression + temporal filtering) and optional FD-based temporal censoring to fMRI data preprocessed with [fMRIPrep](https://fmriprep.org). It produces BIDS-compliant denoised outputs that can be used as input to downstream tools like [connectomix](https://github.com/ln2t/connectomix) (connectomix version 4.0.0 and onwards).
 
@@ -26,21 +34,16 @@ pip install -e .
 
 ```bash
 # Basic denoising with a predefined strategy
-fmridenoiser /data/bids /data/derivatives/denoised participant --strategy csfwm_6p
+fmridenoiser /path/to/fmriprep /path/to/fmridenoiser_output participant --strategy csfwm_6p
 
 # Process a specific subject
-fmridenoiser /data/bids /data/output participant --participant-label 01 --strategy minimal
+fmridenoiser /path/to/fmriprep /path/to/fmridenoiser_output participant --participant-label 01 --strategy minimal
 
 # With FD-based motion censoring
-fmridenoiser /data/bids /data/output participant --strategy csfwm_6p --fd-threshold 0.5
+fmridenoiser /path/to/fmriprep /path/to/fmridenoiser_output participant --strategy csfwm_6p --fd-threshold 0.5
 
 # Using scrubbing5 strategy (includes FD censoring)
-fmridenoiser /data/bids /data/output participant --strategy scrubbing5
-
-# Specify fMRIPrep derivatives location
-fmridenoiser /data/bids /data/output participant \
-    --derivatives fmriprep=/path/to/fmriprep \
-    --strategy gs_csfwm_12p
+fmridenoiser /path/to/fmriprep /path/to/fmridenoiser_output participant --strategy scrubbing5
 ```
 
 ## Denoising Strategies
@@ -61,36 +64,16 @@ fmridenoiser /data/bids /data/output participant \
 
 Temporal censoring (volume removal) is applied **after** denoising. Denoising via confound regression and temporal filtering (`nilearn.image.clean_img`) is performed on the full time series first, then volumes are removed based on motion thresholds if censoring is enabled.
 
-## Output Structure
-
-```
-output_dir/
-├── dataset_description.json
-├── config/
-│   └── backups/
-│       └── denoising_config_YYYYMMDD_HHMMSS.json
-└── sub-01/
-    ├── func/
-    │   ├── sub-01_task-rest_space-MNI_denoise-csfwm6p_desc-denoised_bold.nii.gz
-    │   └── sub-01_task-rest_space-MNI_denoise-csfwm6p_desc-denoised_bold.json
-    ├── masks/
-    │   ├── sub-01_space-MNI_desc-brain_mask.nii.gz
-    │   └── sub-01_task-rest_space-MNI_desc-brain_mask.nii.gz
-    ├── figures/
-    │   └── [QA figures]
-    └── sub-01_task-rest_desc-csfwm6p_denoising-report.html
-```
-
 ## Integration with connectomix
 
 fmridenoiser is designed to work as a preprocessing step before [connectomix](https://github.com/ln2t/connectomix):
 
 ```bash
 # Step 1: Denoise with fmridenoiser
-fmridenoiser /data/bids /data/derivatives/fmridenoiser participant --strategy csfwm_6p
+fmridenoiser /path/to/fmriprep /path/to/fmridenoiser_output participant --strategy csfwm_6p
 
 # Step 2: Compute connectivity with connectomix
-connectomix /data/derivatives/fmridenoiser /data/derivatives/connectomix participant \
+connectomix /path/to/fmridenoiser_output /path/to/connectomix_output participant \
     --method roiToRoi --atlas schaefer2018n100
 ```
 
@@ -101,6 +84,10 @@ connectomix /data/derivatives/fmridenoiser /data/derivatives/connectomix partici
 - **Denoising strategies**: Wang et al. (2024). Benchmarking fMRI denoising strategies for functional connectomics.
 - **Motion scrubbing**: Power et al. (2012). Spurious but systematic correlations in functional connectivity MRI networks arise from subject motion. *NeuroImage*, 59, 2142-2154.
 
+## Acknowledgments
+
+fmridenoiser is built on Nilearn, a powerful Python library for analyzing neuroimaging data. For questions, refer to the [Nilearn documentation](https://nilearn.github.io/).
+
 ## License
 
-MIT License
+AGPLv3 License - See [LICENSE](LICENSE) file for details.
